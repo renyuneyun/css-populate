@@ -128,24 +128,20 @@ async function getPersonInfo(store, uriBase, pers) {
     const uriFirstName = `${uriBase}/vocabulary/firstName`;
     const uriLastName = `${uriBase}/vocabulary/lastName`;
     let id, firstName, lastName;
-    for (const quad of store.readQuads(namedNode(uriPerson), namedNode(uriId), null)) {
-        if (id) {
-            console.error("Person has two IDs!")
+
+    let one = (uriPredicate, type) => {
+        let ret;
+        for (const quad of store.readQuads(namedNode(uriPerson), namedNode(uriPredicate), null)) {
+            if (ret) {
+                console.error(`Person has two ${type}s!`)
+            }
+            ret = quad.object.value;
         }
-        id = quad.object.value;
-    }
-    for (const quad of store.readQuads(namedNode(uriPerson), namedNode(uriFirstName), null)) {
-        if (firstName) {
-            console.error("Person has two firstNames!")
-        }
-        firstName = quad.object.value;
-    }
-    for (const quad of store.readQuads(namedNode(uriPerson), namedNode(uriLastName), null)) {
-        if (lastName) {
-            console.error("Person has two lastNames!")
-        }
-        lastName = quad.object.value;
-    }
+        return ret;
+    };
+    id = one(uriId, "ID");
+    firstName = one(uriFirstName, "firstName");
+    lastName = one(uriLastName, "lastName");
     return [id, firstName, lastName];
 }
 
@@ -219,7 +215,7 @@ async function updateProfiles(genDataDir, persUserMap) {
             const storeProfile = await readIntoStore(fileProfile);
             await mergeProfileAndInfo(storeProfile, persInfo, account);
             await mergeProfileAndFriends(storeProfile, account, friends, persUserMap)
-            await writeProfile(storeProfile, fileProfile);
+            // await writeProfile(storeProfile, fileProfile);
         } catch (error) {
             console.error(error);
         }
@@ -282,7 +278,7 @@ async function main() {
             // const account = `${firstName}${id}`.replace(/[^A-Za-z0-9]/, '');
             const account = `user${persIndex}`;
 
-            await initUserPod(genDataDir, account, file);
+            // await initUserPod(genDataDir, account, file);
 
             persUserMap.set(pers, {account, file});
         }
