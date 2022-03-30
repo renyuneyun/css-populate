@@ -42,7 +42,7 @@ const prefixes = {
     vcard: "http://www.w3.org/2006/vcard/ns#",
 }
 
-const uriBase = 'http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0';
+const uriBaseLDBC = 'http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0';
 
 /**
  *
@@ -83,6 +83,24 @@ async function createPod(nameValue) {
 }
 
 
+/**
+ * Read and extract relevant information from generated LDBC data for a user.
+ * Including user name, user ID and friends.
+ * Friends are the original URIs in the original data.
+ * The generated data is that created by https://github.com/rubensworks/ldbc-snb-decentralized.js.
+ *
+ * @param {string} genDataDir - The directory containing generated data
+ * @param {string} file - The generated data file name
+ * @param {string} pers - The person identifier of the person in this data.
+ * @return [persInfo, friendList] - where
+ *   persInfo = {id, firstName, lastName},
+ *   friendList is an array of strings (friends URIs)
+ *
+ *
+ * @example
+ *
+ *     persInfo, friends = readAndParseInfo("PATH", "file.nq", "pers00000001");
+ */
 async function readAndParseInfo(genDataDir, file, pers) {
 
     const store = await readIntoStore(genDataDir+file);
@@ -92,6 +110,10 @@ async function readAndParseInfo(genDataDir, file, pers) {
 }
 
 
+/**
+ * Read the RDF document represented in the filepath into a {@link N3.Store}
+ * TODO: optimise by using asynchronous methods or streaming methods.
+ */
 async function readIntoStore(filepath) {
     const parser = new N3.Parser({ blankNodePrefix: '' });  // See https://github.com/rdfjs/N3.js/issues/183. Only needed if calling parse() multiple times for different parts of the same file.
     const store = new N3.Store();
@@ -103,56 +125,65 @@ async function readIntoStore(filepath) {
     return store;
 }
 
+
+/**
+ * Retrieve information from the quad store.
+ * This is used within {@link readAndParseInfo()}, and is not expected to be used elsewhere.
+ */
 async function parseInfo(pers, store) {
 
-    let info = await getPersonInfo(store, uriBase, pers);
+    let info = await getPersonInfo(store, pers);
     let [id, firstName, lastName] = info;
 
     if (!id || !firstName || !lastName) {
         return null;
     }
 
-    let friendList = await getFriendList(store, uriBase, pers);
+    let friendList = await getFriendList(store, pers);
 
     return [{id, firstName, lastName}, friendList];
 
 }
 
-async function getPersonInfo(store, uriBase, pers) {
+/**
+ * Retrieve personal information from the quad store.
+ * This is used within {@link readAndParseInfo()}, and is not expected to be used elsewhere.
+ */
+async function getPersonInfo(store, pers) {
     //    //examples:
     //    //<http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/data/pers00000000000000000065> <http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/vocabulary/id> "65"^^<http://www.w3.org/2001/XMLSchema#long> 
     //    //<http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/data/pers00000000000000000065> <http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/vocabulary/firstName> "Marc" .
     //    //<http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/data/pers00000000000000000065> <http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/vocabulary/lastName> "Ravalomanana" .
-    const uriPerson = `${uriBase}/data/${pers}`;
-    const uriId = `${uriBase}/vocabulary/id`;
-    const uriFirstName = `${uriBase}/vocabulary/firstName`;
-    const uriLastName = `${uriBase}/vocabulary/lastName`;
+    const uriPerson = `${uriBaseLDBC}/data/${pers}`;
+    const uriId = `${uriBaseLDBC}/vocabulary/id`;
+    const uriFirstName = `${uriBaseLDBC}/vocabulary/firstName`;
+    const uriLastName = `${uriBaseLDBC}/vocabulary/lastName`;
     let id, firstName, lastName;
-    for (const quad of store.readQuads(namedNode(uriPerson), namedNode(uriId), null)) {
-        if (id) {
-            console.error("Person has two IDs!")
+
+    let one = (uriPredicate, type) => {
+        let ret;
+        for (const quad of store.readQuads(namedNode(uriPerson), namedNode(uriPredicate), null)) {
+            if (ret) {
+                console.error(`Person has two ${type}s!`)
+            }
+            ret = quad.object.value;
         }
-        id = quad.object.value;
-    }
-    for (const quad of store.readQuads(namedNode(uriPerson), namedNode(uriFirstName), null)) {
-        if (firstName) {
-            console.error("Person has two firstNames!")
-        }
-        firstName = quad.object.value;
-    }
-    for (const quad of store.readQuads(namedNode(uriPerson), namedNode(uriLastName), null)) {
-        if (lastName) {
-            console.error("Person has two lastNames!")
-        }
-        lastName = quad.object.value;
-    }
+        return ret;
+    };
+    id = one(uriId, "ID");
+    firstName = one(uriFirstName, "firstName");
+    lastName = one(uriLastName, "lastName");
     return [id, firstName, lastName];
 }
 
-async function getFriendList(store, uriBase, pers) {
-    const uriPerson = `${uriBase}/data/${pers}`;
-    const uriKnows = `${uriBase}/vocabulary/knows`;
-    const uriHasPerson = `${uriBase}/vocabulary/hasPerson`;
+/**
+ * Retrieve friend list from the quad store.
+ * This is used within {@link readAndParseInfo()}, and is not expected to be used elsewhere.
+ */
+async function getFriendList(store, pers) {
+    const uriPerson = `${uriBaseLDBC}/data/${pers}`;
+    const uriKnows = `${uriBaseLDBC}/vocabulary/knows`;
+    const uriHasPerson = `${uriBaseLDBC}/vocabulary/hasPerson`;
     let friends = [];
     for (const quad of store.readQuads(namedNode(uriPerson), namedNode(uriKnows), null)) {
         let friend;
@@ -168,6 +199,10 @@ async function getFriendList(store, uriBase, pers) {
     return friends;
 }
 
+/**
+ * Merge the WebID profile and personal information.
+ * This is used within {@link updateProfiles()}, and is not expected to be used elsewhere.
+ */
 async function mergeProfileAndInfo(storeProfile, persInfo, account) {
     const uriAccount = `${cssBaseUrl}${account}/profile/card#me`;
     const vcardName = `${prefixes.vcard}fn`;
@@ -176,6 +211,13 @@ async function mergeProfileAndInfo(storeProfile, persInfo, account) {
     storeProfile.addQuad(namedNode(uriAccount), namedNode(vcardName), literal(name));
 }
 
+/**
+ * Add the list of friends to the WebID profile.
+ * This is used within {@link updateProfiles()}, and is not expected to be used elsewhere.
+ *
+ * @param {Map<string, {string, string>} persUserMap - The mapping from person ID to Pod information. Same as that used in {@link updateProfiles()}
+ * TODO: Complete doc for the parameters.
+ */
 async function mergeProfileAndFriends(storeProfile, account, friends, persUserMap) {
     const uriAccount = `${cssBaseUrl}${account}/profile/card#me`;
     const foafKnows = `${prefixes.foaf}knows`;
@@ -191,6 +233,9 @@ async function mergeProfileAndFriends(storeProfile, account, friends, persUserMa
     }
 }
 
+/**
+ * Write the WebID profile (storeProfile) into the file (fileProfile)
+ */
 async function writeProfile(storeProfile, fileProfile) {
     const writer = new N3.Writer({ prefixes: prefixes });
     for (const quad of storeProfile) {
@@ -208,6 +253,16 @@ async function writeProfile(storeProfile, fileProfile) {
     });
 }
 
+/**
+ * Update the user profiles with the generated person data.
+ * User profiles (and thus pods) should be generated before calling this function.
+ * This function will modify the users' WebID document (profile cards).
+ *
+ * @param {Map<string, {string, string>} persUserMap - The mapping from person ID to Pod information:
+ *     key: person ID, extracted from generated data;
+ *     value: {account, file} where account is the Pod account name, and file is the filename of the generated data for that person.
+ * TODO: Complete doc for the parameters.
+ */
 async function updateProfiles(genDataDir, persUserMap) {
     for (const [pers, {account, file}] of persUserMap) {
         try {
@@ -226,6 +281,10 @@ async function updateProfiles(genDataDir, persUserMap) {
     }
 }
 
+/**
+ * Create and initialize the contents of a user pod.
+ * It calls the user registration of CSS, and then puts the corresponding `person.nq` file under it (and its ACL).
+ */
 async function initUserPod(genDataDir, account, file) {
     const podDir = `${cssDataDir}${account}`;
     try {
