@@ -83,6 +83,24 @@ async function createPod(nameValue) {
 }
 
 
+/**
+ * Read and extract relevant information from generated LDBC data for a user.
+ * Including user name, user ID and friends.
+ * Friends are the original URIs in the original data.
+ * The generated data is that created by https://github.com/rubensworks/ldbc-snb-decentralized.js.
+ *
+ * @param {string} genDataDir - The directory containing generated data
+ * @param {string} file - The generated data file name
+ * @param {string} pers - The person identifier of the person in this data.
+ * @return [persInfo, friendList] - where
+ *   persInfo = {id, firstName, lastName},
+ *   friendList is an array of strings (friends URIs)
+ *
+ *
+ * @example
+ *
+ *     persInfo, friends = readAndParseInfo("PATH", "file.nq", "pers00000001");
+ */
 async function readAndParseInfo(genDataDir, file, pers) {
 
     const store = await readIntoStore(genDataDir+file);
@@ -92,6 +110,10 @@ async function readAndParseInfo(genDataDir, file, pers) {
 }
 
 
+/**
+ * Read the RDF document represented in the filepath into a {@link N3.Store}
+ * TODO: optimise by using asynchronous methods or streaming methods.
+ */
 async function readIntoStore(filepath) {
     const parser = new N3.Parser({ blankNodePrefix: '' });  // See https://github.com/rdfjs/N3.js/issues/183. Only needed if calling parse() multiple times for different parts of the same file.
     const store = new N3.Store();
@@ -103,6 +125,11 @@ async function readIntoStore(filepath) {
     return store;
 }
 
+
+/**
+ * Retrieve information from the quad store.
+ * This is used within {@link readAndParseInfo()}, and is not expected to be used elsewhere.
+ */
 async function parseInfo(pers, store) {
 
     let info = await getPersonInfo(store, uriBase, pers);
@@ -118,6 +145,10 @@ async function parseInfo(pers, store) {
 
 }
 
+/**
+ * Retrieve personal information from the quad store.
+ * This is used within {@link readAndParseInfo()}, and is not expected to be used elsewhere.
+ */
 async function getPersonInfo(store, uriBase, pers) {
     //    //examples:
     //    //<http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/data/pers00000000000000000065> <http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/vocabulary/id> "65"^^<http://www.w3.org/2001/XMLSchema#long> 
@@ -145,6 +176,10 @@ async function getPersonInfo(store, uriBase, pers) {
     return [id, firstName, lastName];
 }
 
+/**
+ * Retrieve friend list from the quad store.
+ * This is used within {@link readAndParseInfo()}, and is not expected to be used elsewhere.
+ */
 async function getFriendList(store, uriBase, pers) {
     const uriPerson = `${uriBase}/data/${pers}`;
     const uriKnows = `${uriBase}/vocabulary/knows`;
@@ -164,6 +199,10 @@ async function getFriendList(store, uriBase, pers) {
     return friends;
 }
 
+/**
+ * Merge the WebID profile and personal information.
+ * This is used within {@link updateProfiles()}, and is not expected to be used elsewhere.
+ */
 async function mergeProfileAndInfo(storeProfile, persInfo, account) {
     const uriAccount = `${cssBaseUrl}${account}/profile/card#me`;
     const vcardName = `${prefixes.vcard}fn`;
@@ -172,6 +211,13 @@ async function mergeProfileAndInfo(storeProfile, persInfo, account) {
     storeProfile.addQuad(namedNode(uriAccount), namedNode(vcardName), literal(name));
 }
 
+/**
+ * Add the list of friends to the WebID profile.
+ * This is used within {@link updateProfiles()}, and is not expected to be used elsewhere.
+ *
+ * @param {Map<string, {string, string>} persUserMap - The mapping from person ID to Pod information. Same as that used in {@link updateProfiles()}
+ * TODO: Complete doc for the parameters.
+ */
 async function mergeProfileAndFriends(storeProfile, account, friends, persUserMap) {
     const uriAccount = `${cssBaseUrl}${account}/profile/card#me`;
     const foafKnows = `${prefixes.foaf}knows`;
@@ -187,6 +233,9 @@ async function mergeProfileAndFriends(storeProfile, account, friends, persUserMa
     }
 }
 
+/**
+ * Write the WebID profile (storeProfile) into the file (fileProfile)
+ */
 async function writeProfile(storeProfile, fileProfile) {
     const writer = new N3.Writer({ prefixes: prefixes });
     for (const quad of storeProfile) {
@@ -204,6 +253,16 @@ async function writeProfile(storeProfile, fileProfile) {
     });
 }
 
+/**
+ * Update the user profiles with the generated person data.
+ * User profiles (and thus pods) should be generated before calling this function.
+ * This function will modify the users' WebID document (profile cards).
+ *
+ * @param {Map<string, {string, string>} persUserMap - The mapping from person ID to Pod information:
+ *     key: person ID, extracted from generated data;
+ *     value: {account, file} where account is the Pod account name, and file is the filename of the generated data for that person.
+ * TODO: Complete doc for the parameters.
+ */
 async function updateProfiles(genDataDir, persUserMap) {
     for (const [pers, {account, file}] of persUserMap) {
         try {
@@ -215,13 +274,17 @@ async function updateProfiles(genDataDir, persUserMap) {
             const storeProfile = await readIntoStore(fileProfile);
             await mergeProfileAndInfo(storeProfile, persInfo, account);
             await mergeProfileAndFriends(storeProfile, account, friends, persUserMap)
-            // await writeProfile(storeProfile, fileProfile);
+            await writeProfile(storeProfile, fileProfile);
         } catch (error) {
             console.error(error);
         }
     }
 }
 
+/**
+ * Create and initialize the contents of a user pod.
+ * It calls the user registration of CSS, and then puts the corresponding `person.nq` file under it (and its ACL).
+ */
 async function initUserPod(genDataDir, account, file) {
     const podDir = `${cssDataDir}${account}`;
     try {
@@ -278,7 +341,7 @@ async function main() {
             // const account = `${firstName}${id}`.replace(/[^A-Za-z0-9]/, '');
             const account = `user${persIndex}`;
 
-            // await initUserPod(genDataDir, account, file);
+            await initUserPod(genDataDir, account, file);
 
             persUserMap.set(pers, {account, file});
         }
