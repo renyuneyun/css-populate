@@ -42,7 +42,7 @@ const prefixes = {
     vcard: "http://www.w3.org/2006/vcard/ns#",
 }
 
-const uriBase = 'http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0';
+const uriBaseLDBC = 'http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0';
 
 /**
  *
@@ -132,14 +132,14 @@ async function readIntoStore(filepath) {
  */
 async function parseInfo(pers, store) {
 
-    let info = await getPersonInfo(store, uriBase, pers);
+    let info = await getPersonInfo(store, pers);
     let [id, firstName, lastName] = info;
 
     if (!id || !firstName || !lastName) {
         return null;
     }
 
-    let friendList = await getFriendList(store, uriBase, pers);
+    let friendList = await getFriendList(store, pers);
 
     return [{id, firstName, lastName}, friendList];
 
@@ -149,15 +149,15 @@ async function parseInfo(pers, store) {
  * Retrieve personal information from the quad store.
  * This is used within {@link readAndParseInfo()}, and is not expected to be used elsewhere.
  */
-async function getPersonInfo(store, uriBase, pers) {
+async function getPersonInfo(store, pers) {
     //    //examples:
     //    //<http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/data/pers00000000000000000065> <http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/vocabulary/id> "65"^^<http://www.w3.org/2001/XMLSchema#long> 
     //    //<http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/data/pers00000000000000000065> <http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/vocabulary/firstName> "Marc" .
     //    //<http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/data/pers00000000000000000065> <http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0/vocabulary/lastName> "Ravalomanana" .
-    const uriPerson = `${uriBase}/data/${pers}`;
-    const uriId = `${uriBase}/vocabulary/id`;
-    const uriFirstName = `${uriBase}/vocabulary/firstName`;
-    const uriLastName = `${uriBase}/vocabulary/lastName`;
+    const uriPerson = `${uriBaseLDBC}/data/${pers}`;
+    const uriId = `${uriBaseLDBC}/vocabulary/id`;
+    const uriFirstName = `${uriBaseLDBC}/vocabulary/firstName`;
+    const uriLastName = `${uriBaseLDBC}/vocabulary/lastName`;
     let id, firstName, lastName;
 
     let one = (uriPredicate, type) => {
@@ -180,10 +180,10 @@ async function getPersonInfo(store, uriBase, pers) {
  * Retrieve friend list from the quad store.
  * This is used within {@link readAndParseInfo()}, and is not expected to be used elsewhere.
  */
-async function getFriendList(store, uriBase, pers) {
-    const uriPerson = `${uriBase}/data/${pers}`;
-    const uriKnows = `${uriBase}/vocabulary/knows`;
-    const uriHasPerson = `${uriBase}/vocabulary/hasPerson`;
+async function getFriendList(store, pers) {
+    const uriPerson = `${uriBaseLDBC}/data/${pers}`;
+    const uriKnows = `${uriBaseLDBC}/vocabulary/knows`;
+    const uriHasPerson = `${uriBaseLDBC}/vocabulary/hasPerson`;
     let friends = [];
     for (const quad of store.readQuads(namedNode(uriPerson), namedNode(uriKnows), null)) {
         let friend;
