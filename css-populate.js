@@ -8,8 +8,39 @@ import {hideBin} from "yargs/helpers";
 import fetch from 'node-fetch';
 import * as N3 from 'n3'
 const { namedNode, literal } = N3.DataFactory;
+import * as fse from 'fs-extra';
 
 const argv = yargs(hideBin(process.argv))
+    .command('ldbc', 'Populate with LDBC data.', (yargs) => {
+        yargs
+            .option('generated', {
+                alias: 'g',
+                type: 'string',
+                description: 'Dir with the generated data',
+                demandOption: true
+            })
+    })
+    .command('full', 'Populate with full-connect data', (yargs) => {
+        yargs
+            .option('number', {
+                alias: 'n',
+                type: 'number',
+                description: 'Number of accounts to generate',
+                demandOption: true
+            })
+            .option('generated', {
+                alias: 'g',
+                type: 'string',
+                description: 'Dir of the LDBC data; used to initialize user name',
+                demandOption: false
+            })
+            .option('extra', {
+                alias: 'e',
+                type: 'string',
+                description: 'Extra data to put into user pod. This should be a directory, whose contents are sub-dirs named with user names (user1, user2, etc).',
+                demandOption: false
+            })
+    })
     .option('url', {
         alias: 'u',
         type: 'string',
@@ -20,29 +51,34 @@ const argv = yargs(hideBin(process.argv))
         alias: 'd',
         type: 'string',
         description: 'Data dir of the CSS',
-        // demandOption: true
-    })
-    .option('generated', {
-        alias: 'g',
-        type: 'string',
-        description: 'Dir with the generated data',
         demandOption: true
     })
     .help()
     .parseSync();
 
-const cssBaseUrl = argv.url.endsWith('/') ? argv.url : argv.url+'/';
-const cssDataDir = argv.data.endsWith('/') ? argv.data : argv.data+'/';
-const generatedDataBaseDir = argv.generated.endsWith('/') ? argv.generated : argv.generated+'/';
+function dirStr(dir) {
+    return dir.endsWith('/') ? dir : dir+'/';
+}
+function maybeDirStr(maybeDir) {
+    return maybeDir ? dirStr(maybeDir) : undefined;
+}
 
+const command = argv._[0];
+
+const cssBaseUrl = dirStr(argv.url);
+const cssDataDir = dirStr(argv.data);
+
+const extraDir = maybeDirStr(argv.extra);
+
+const generatedDataBaseDir = maybeDirStr(argv.generated);
+
+const uriBaseLDBC = 'http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0';
 
 const prefixes = {
     foaf: "http://xmlns.com/foaf/0.1/",
     solid: "http://www.w3.org/ns/solid/terms#",
     vcard: "http://www.w3.org/2006/vcard/ns#",
 }
-
-const uriBaseLDBC = 'http://localhost:3000/www.ldbc.eu/ldbc_socialnet/1.0';
 
 /**
  *
@@ -92,7 +128,7 @@ async function createPod(nameValue) {
  * @param {string} genDataDir - The directory containing generated data
  * @param {string} file - The generated data file name
  * @param {string} pers - The person identifier of the person in this data.
- * @return [persInfo, friendList] - where
+ * @return {persInfo, friendList} - where
  *   persInfo = {id, firstName, lastName},
  *   friendList is an array of strings (friends URIs)
  *
@@ -218,7 +254,7 @@ async function mergeProfileAndInfo(storeProfile, persInfo, account) {
  * @param {Map<string, {string, string>} persUserMap - The mapping from person ID to Pod information. Same as that used in {@link updateProfiles()}
  * TODO: Complete doc for the parameters.
  */
-async function mergeProfileAndFriends(storeProfile, account, friends, persUserMap) {
+async function mergeProfileAndFriendsLDBC(storeProfile, account, friends, persUserMap) {
     const uriAccount = `${cssBaseUrl}${account}/profile/card#me`;
     const foafKnows = `${prefixes.foaf}knows`;
     for (const friendNodeStr of friends) {
@@ -226,6 +262,35 @@ async function mergeProfileAndFriends(storeProfile, account, friends, persUserMa
             const persFriend = friendNodeStr.split('/').pop();
             const {account:accountFriend} = persUserMap.get(persFriend);
             const uriFriendProfile = `${cssBaseUrl}${accountFriend}/profile/card#me`;
+            storeProfile.addQuad(namedNode(uriAccount), namedNode(foafKnows), namedNode(uriFriendProfile));
+        } catch (error) {
+            console.error(error);
+        }
+    }
+}
+
+async function addDummyFriends(account, friends) {
+    try {
+        const fileProfile = `${cssDataDir}${account}/profile/card$.ttl`;
+        const storeProfile = await readIntoStore(fileProfile);
+        await mergeProfileAndFriends(storeProfile, account, friends)
+        await writeProfile(storeProfile, fileProfile);
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+async function mergeProfileAndFriends(storeProfile, account, friends) {
+    const uriAccount = `${cssBaseUrl}${account}/profile/card#me`;
+    const foafKnows = `${prefixes.foaf}knows`;
+    for (const friendStr of friends) {
+        try {
+            let uriFriendProfile;
+            if (friendStr.includes('https://')) {
+                uriFriendProfile = friendStr;
+            } else {
+                uriFriendProfile = `${cssBaseUrl}${friendStr}/profile/card#me`;
+            }
             storeProfile.addQuad(namedNode(uriAccount), namedNode(foafKnows), namedNode(uriFriendProfile));
         } catch (error) {
             console.error(error);
@@ -272,10 +337,61 @@ async function updateProfile(genDataDir, pers, account, ldbcFile, persUserMap) {
         const fileProfile = `${cssDataDir}${account}/profile/card$.ttl`;
         const storeProfile = await readIntoStore(fileProfile);
         await mergeProfileAndInfo(storeProfile, persInfo, account);
-        await mergeProfileAndFriends(storeProfile, account, friends, persUserMap)
+        if (persUserMap) {
+            await mergeProfileAndFriendsLDBC(storeProfile, account, friends, persUserMap);
+        }
         await writeProfile(storeProfile, fileProfile);
     } catch (error) {
         console.error(error);
+    }
+}
+
+async function putIntoUserPod(account, baseDir) {
+    const podDir = `${cssDataDir}${account}`;
+    const contents = fse.readdirSync(baseDir);
+    for (const content of contents) {
+        const target = `${podDir}/${content}`;
+        const source = `${baseDir}/${content}`;
+        fse.copySync(source, target);
+
+        let targetAcl, aclContent;
+        if (fse.statSync(source).isDirectory) {
+            targetAcl = `${target}/.acl`;
+            aclContent = `@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+@prefix foaf: <http://xmlns.com/foaf/0.1/>.
+
+<#public>
+    a acl:Authorization;
+    acl:accessTo <./>;
+    acl:agentClass foaf:Agent;
+    acl:mode acl:Read.
+
+<#owner>
+    a acl:Authorization;
+    acl:accessTo <./>;
+    acl:default <./>;
+    acl:agent <http://css:3000/${account}/profile/card#me>;
+    acl:mode acl:Read, acl:Write, acl:Control.
+`;
+        } else {
+            targetAcl = `${target}.acl`;
+            aclContent = `@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+@prefix foaf: <http://xmlns.com/foaf/0.1/>.
+
+<#public>
+    a acl:Authorization;
+    acl:accessTo <./${content}>;
+    acl:agentClass foaf:Agent;
+    acl:mode acl:Read.
+
+<#owner>
+    a acl:Authorization;
+    acl:accessTo <./${content}>;
+    acl:agent <http://css:3000/${account}/profile/card#me>;
+    acl:mode acl:Read, acl:Write, acl:Control.
+`;
+        }
+        fse.writeFileSync(targetAcl, aclContent);
     }
 }
 
@@ -283,7 +399,7 @@ async function updateProfile(genDataDir, pers, account, ldbcFile, persUserMap) {
  * Create and initialize the contents of a user pod.
  * It calls the user registration of CSS, and then puts the corresponding `person.nq` file under it (and its ACL).
  */
-async function initUserPod(genDataDir, account, file) {
+async function initUserPod(account, genDataDir, ldbcPersFile) {
     const podDir = `${cssDataDir}${account}`;
     try {
         await createPod(account);
@@ -298,13 +414,14 @@ async function initUserPod(genDataDir, account, file) {
         return;
     }
 
-    // const podFile = `${podDir}/${file}`;
-    const podFile = `${podDir}/person.nq`;
-    fs.copyFileSync(genDataDir+file, podFile);
-    console.log(`   cp ${genDataDir+file} ${podFile}`);
+    if (ldbcPersFile) {
+        // const podFile = `${podDir}/${file}`;
+        const podFile = `${podDir}/person.nq`;
+        fs.copyFileSync(genDataDir+ldbcPersFile, podFile);
+        console.log(`   cp ${genDataDir+ldbcPersFile} ${podFile}`);
 
-    const podFileAcl = `${podFile}.acl`;
-    fs.writeFileSync(podFileAcl, `@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+        const podFileAcl = `${podFile}.acl`;
+        fs.writeFileSync(podFileAcl, `@prefix acl: <http://www.w3.org/ns/auth/acl#>.
 @prefix foaf: <http://xmlns.com/foaf/0.1/>.
 
 <#public>
@@ -319,13 +436,11 @@ async function initUserPod(genDataDir, account, file) {
     acl:agent <http://css:3000/${account}/profile/card#me>;
     acl:mode acl:Read, acl:Write, acl:Control.
 `);
-    console.log(`   created ${podFileAcl}`);
+        console.log(`   created ${podFileAcl}`);
+    }
 }
 
-//Example person file:
-//  /users/wvdemeer/pod-generator/out-fragments/http/localhost_3000/www.ldbc.eu/ldbc_socialnet/1.0/data/pers*.nq
-async function main() {
-    const genDataDir = generatedDataBaseDir+"out-fragments/http/localhost_3000/www.ldbc.eu/ldbc_socialnet/1.0/data/"
+function bindLDBCWithAccount(genDataDir) {
     const files = fs.readdirSync(genDataDir);
     let persUserMap = new Map();
     let curIndex = 0;
@@ -341,11 +456,67 @@ async function main() {
             persUserMap.set(pers, {account, file});
         }
     }
+    return persUserMap;
+}
+
+//Example person file:
+//  /users/wvdemeer/pod-generator/out-fragments/http/localhost_3000/www.ldbc.eu/ldbc_socialnet/1.0/data/pers*.nq
+async function mainLDBC() {
+    const genDataDir = generatedDataBaseDir+"out-fragments/http/localhost_3000/www.ldbc.eu/ldbc_socialnet/1.0/data/"
+    const persUserMap = bindLDBCWithAccount(genDataDir);
 
     for (const [pers, {account, file}] of persUserMap) {
         console.log(`file=${file} pers=${pers} account=${account}`);
-        await initUserPod(genDataDir, account, file);
+        await initUserPod(account, genDataDir, file);
         await updateProfile(genDataDir, pers, account, file, persUserMap);
+    }
+}
+
+async function mainFull() {
+    let accounts = [];
+    for (let i = 0; i < argv.number; i++) {
+        const account = `user${i}`;
+        accounts.push(account);
+    }
+
+    if (generatedDataBaseDir) {
+        const genDataDir = generatedDataBaseDir+"out-fragments/http/localhost_3000/www.ldbc.eu/ldbc_socialnet/1.0/data/";
+        const persUserMap = bindLDBCWithAccount(genDataDir);
+        let i = 0;
+        for (const [pers, {account, file}] of persUserMap) {
+            if (i >= argv.number)
+                break;
+            console.log(`file=${file} pers=${pers} account=${account}`);
+            await initUserPod(account, genDataDir, file);
+            await updateProfile(genDataDir, pers, account, file);
+            await addDummyFriends(account, accounts.filter(ac => ac != account));
+            if (extraDir) {
+                const userExtra = `${extraDir}${account}`;
+                await putIntoUserPod(account, userExtra);
+            }
+            i++;
+        }
+    } else {
+        for (let i = 0; i < argv.number; i++) {
+            const account = accounts[i];
+            await initUserPod(account);
+            await addDummyFriends(account, accounts.filter(ac => ac != account));
+            if (extraDir) {
+                const userExtra = `${extraDir}${account}`;
+                await putIntoUserPod(account, userExtra);
+            }
+        }
+    }
+}
+
+
+async function main() {
+    if (command == 'ldbc') {
+        await mainLDBC();
+    } else if (command == 'full') {
+        await mainFull();
+    } else {
+        throw Error('Unknown command, and not handled by yargs');
     }
 }
 //require.main === module only works for CommonJS, not for ES modules in Node.js
@@ -353,7 +524,7 @@ async function main() {
 //so we will simply not check. That means you don't want to import this module by mistake.
 // if (require.main === module) {
     try {
-        await main(process.argv[2], process.argv[3]);
+        await main();
         // process.exit(0);
     } catch (err) {
         console.error(err);
