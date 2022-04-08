@@ -254,30 +254,28 @@ async function writeProfile(storeProfile, fileProfile) {
 }
 
 /**
- * Update the user profiles with the generated person data.
+ * Update the user profile from the generated (LDBC) person data.
  * User profiles (and thus pods) should be generated before calling this function.
  * This function will modify the users' WebID document (profile cards).
  *
- * @param {Map<string, {string, string>} persUserMap - The mapping from person ID to Pod information:
+ * @param {Map<string, {string, ...>} persUserMap - The mapping from person ID to Pod information:
  *     key: person ID, extracted from generated data;
- *     value: {account, file} where account is the Pod account name, and file is the filename of the generated data for that person.
+ *     value: {account, ...} where account is the Pod account name, and the rest does not matter.
  * TODO: Complete doc for the parameters.
  */
-async function updateProfiles(genDataDir, persUserMap) {
-    for (const [pers, {account, file}] of persUserMap) {
-        try {
-            const info = await readAndParseInfo(genDataDir, file, pers);
-            if (!info)
-                continue;
-            const [persInfo, friends] = info;
-            const fileProfile = `${cssDataDir}${account}/profile/card$.ttl`;
-            const storeProfile = await readIntoStore(fileProfile);
-            await mergeProfileAndInfo(storeProfile, persInfo, account);
-            await mergeProfileAndFriends(storeProfile, account, friends, persUserMap)
-            await writeProfile(storeProfile, fileProfile);
-        } catch (error) {
-            console.error(error);
-        }
+async function updateProfile(genDataDir, pers, account, ldbcFile, persUserMap) {
+    try {
+        const info = await readAndParseInfo(genDataDir, ldbcFile, pers);
+        if (!info)
+            return;
+        const [persInfo, friends] = info;
+        const fileProfile = `${cssDataDir}${account}/profile/card$.ttl`;
+        const storeProfile = await readIntoStore(fileProfile);
+        await mergeProfileAndInfo(storeProfile, persInfo, account);
+        await mergeProfileAndFriends(storeProfile, account, friends, persUserMap)
+        await writeProfile(storeProfile, fileProfile);
+    } catch (error) {
+        console.error(error);
     }
 }
 
@@ -335,19 +333,20 @@ async function main() {
         if (file.startsWith("pers") && file.endsWith(".nq")) {
             const pers = file.substring(0, file.length-3);
             const persIndex = curIndex++;
-            console.log(`file=${file} pers=${pers} persIndex=${persIndex}`);
 
             //const fileBaseName = path.basename(file);
             // const account = `${firstName}${id}`.replace(/[^A-Za-z0-9]/, '');
             const account = `user${persIndex}`;
 
-            await initUserPod(genDataDir, account, file);
-
             persUserMap.set(pers, {account, file});
         }
     }
 
-    await updateProfiles(genDataDir, persUserMap);
+    for (const [pers, {account, file}] of persUserMap) {
+        console.log(`file=${file} pers=${pers} account=${account}`);
+        await initUserPod(genDataDir, account, file);
+        await updateProfile(genDataDir, pers, account, file, persUserMap);
+    }
 }
 //require.main === module only works for CommonJS, not for ES modules in Node.js
 //(though on my test system with node v15.14.0 it works, and on another system with node v17.5.0 it doesn't)
