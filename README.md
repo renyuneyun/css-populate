@@ -1,26 +1,33 @@
 # CSS Populate
+> This is a modified version of the upstream. The main goal is to add relevant information to user profile, and to allow adding additional custom content into user dir. It also changed from JS to TS, for hopefully easier maintainance.
 
 
 Tool to populate the Community Solid Server with dummy accounts and data, for testing purposes.
 
-Install:
+Build & run:
 
 ```
 npm install
-npm link
-css-populate --help
+npm run build
+
+npm start ARG1 ARG2 ...
 ```
 
 Help:
 
 ```
-$ css-populate --help
+$ npm start -- --help
+css-populate.js [command]
+
+Commands:
+  css-populate.js ldbc  Populate with LDBC data.
+  css-populate.js full  Populate with full-connect data
+
 Options:
-      --version    Show version number                                 [boolean]
-  -u, --url        Base URL of the CSS                       [string] [required]
-  -d, --data       Data dir of the CSS                       [string] [required]
-  -g, --generated  Dir with the generated data               [string] [required]
-      --help       Show help
+      --version  Show version number                                   [boolean]
+  -u, --url      Base URL of the CSS                         [string] [required]
+  -d, --data     Data dir of the CSS                         [string] [required]
+      --help     Show help                                             [boolean]
 ```
 
 # Create generated data
